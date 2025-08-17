@@ -1,62 +1,48 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>Lua Obfuscator (hard mode) + Link Preview</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Lua Obfuscator</title>
   <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
   <main>
-    <h1>Lua Obfuscator</h1>
+    <header>
+      <h1>Lua Obfuscator</h1>
+      <p class="sub">Hard-mode packer for Roblox/Luau. No VM. Mobile friendly.</p>
+    </header>
 
-    <div class="grid">
-      <section>
-        <h2>Your Lua</h2>
+    <section class="panel">
+      <label class="field">
+        <span>Your Lua</span>
         <textarea id="src" placeholder="paste your Lua/Roblox script here"></textarea>
-      </section>
-      <section>
-        <h2>Obfuscated Output</h2>
-        <textarea id="out" placeholder="result will appear here"></textarea>
-        <div class="right">
-          <button id="copy">Copy</button>
-          <button id="download">Download .lua</button>
-        </div>
-      </section>
-    </div>
+      </label>
 
-    <div class="controls">
-      <label><input type="checkbox" id="junk" checked> Junk / anti-debug</label>
-      <label>Watermark <input id="wm" placeholder="user-id / key-id"></label>
-      <label>Stage-1 pieces <input id="split" type="number" min="5" max="48" value="10"></label>
-      <label>Late-stitch pieces <input id="late" type="number" min="6" max="64" value="14"></label>
-      <label>Decode delay (frames) <input id="delay" type="number" min="0" max="10" value="2"></label>
-      <button id="go">Obfuscate</button>
-    </div>
-
-    <hr/>
-
-    <h1>Website Preview</h1>
-    <div class="preview-bar">
-      <input id="url" placeholder="https://example.com">
-      <label><input type="checkbox" id="shot"> Screenshot fallback</label>
-      <button id="previewBtn">Preview</button>
-    </div>
-
-    <a id="cardLink" class="card hidden" target="_blank" rel="noreferrer">
-      <img id="cardImg" alt="">
-      <div class="card-body">
-        <div class="card-site">
-          <img id="cardIcon" class="icon" alt="">
-          <span id="cardSite"></span>
-        </div>
-        <div id="cardTitle" class="card-title"></div>
-        <div id="cardDesc" class="card-desc"></div>
+      <div class="controls">
+        <label><input type="checkbox" id="junk" checked> Junk / anti-debug</label>
+        <label>Watermark <input id="wm" placeholder="user-id / key-id"></label>
+        <label>Stage-1 pieces <input id="split" type="number" min="5" max="48" value="10"></label>
+        <label>Late-stitch pieces <input id="late" type="number" min="6" max="64" value="14"></label>
+        <label>Decode delay (frames) <input id="delay" type="number" min="0" max="10" value="1"></label>
+        <button id="go" class="primary">Obfuscate</button>
       </div>
-    </a>
+    </section>
 
-    <h2 style="margin-top:16px;">Canvas (downloadable OG card)</h2>
-    <canvas id="canvas" width="1200" height="630"></canvas>
-    <div class="right"><button id="savePng">Download PNG</button></div>
+    <section class="panel">
+      <div class="row">
+        <label class="field">
+          <span>Obfuscated Output</span>
+          <textarea id="out" placeholder="result will appear here"></textarea>
+        </label>
+      </div>
+      <div class="actions">
+        <button id="copy">Copy</button>
+        <button id="download">Download .lua</button>
+      </div>
+    </section>
+
+    <footer>Tip: keep gate off for executors without HTTP. This build is parser-free (Luau safe).</footer>
   </main>
   <script src="main.js"></script>
 </body>
