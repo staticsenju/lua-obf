@@ -1,4 +1,4 @@
-/* ----------- helpers ----------- */
+/* ========== helpers ========== */
 const rint = (a,b)=>Math.floor(Math.random()*(b-a+1))+a;
 const randIdent = (len = rint(6,10))=>{
   const A='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
@@ -13,8 +13,8 @@ const sum32 = (buf)=>{let s=0>>>0;for(let i=0;i<buf.length;i++)s=(s+buf[i])>>>0;
 const mulHash = (buf)=>{let h=2166136261>>>0;for (let i=0;i<buf.length;i++){h=(h*16777619)>>>0;h=(h^buf[i])>>>0;}return h>>>0;};
 const chunk = (str,size)=>{const out=[];for(let i=0;i<str.length;i+=size)out.push(str.slice(i,i+size));return out;};
 
-/* ----------- Luau-safe simple minifier (no parser) ----------- */
-/* Removes line comments --... and block comments --[[ ... ]] while preserving strings */
+/* ========== Luau-safe simple minifier (no parser) ========== */
+/* Strips --line and --[[block]] comments, preserves strings, trims whitespace */
 function simpleMinify(lua){
   let out = '';
   let i = 0, n = lua.length;
@@ -35,25 +35,24 @@ function simpleMinify(lua){
       i++; continue;
     }
 
-    // block comment start
+    // block comment start --[[
     if (!inLong && c === '-' && c2 === '-' && lua[i+2] === '[' && lua[i+3] === '[') {
       inLong = true; i += 4; continue;
     }
-    // block comment end
+    // block comment end ]]
     if (inLong) {
       if (c === ']' && c2 === ']') { inLong = false; i += 2; continue; }
       i++; continue;
     }
 
-    // line comment
+    // line comment --
     if (c === '-' && c2 === '-') {
-      // skip to EOL
       i += 2;
       while (i < n && lua[i] !== '\n') i++;
       continue;
     }
 
-    // collapse trivial whitespace (keep newlines)
+    // collapse whitespace (keep newlines)
     if (/\s/.test(c)) {
       if (c === '\n') out += '\n';
       else if (out.length && !/\s/.test(out[out.length-1])) out += ' ';
@@ -62,14 +61,10 @@ function simpleMinify(lua){
 
     out += c; i++;
   }
-
-  // trim trailing spaces on lines
-  out = out.split('\n').map(s=>s.trimEnd()).join('\n');
-  return out;
+  return out.split('\n').map(s=>s.trimEnd()).join('\n');
 }
 
-/* ----------- string literal handling without parsing ----------- */
-/* Replace " 'string' " & " \"string\" " with __STR__(i) placeholders (simple scanner) */
+/* ========== string literal handling (no parser) ========== */
 function extractStrings(lua) {
   const lits = [];
   let i=0, out=[], n=lua.length;
@@ -99,25 +94,34 @@ function encStr(s) {
   return { b64: Buffer.from(b).toString('base64'), key, shift };
 }
 
-/* ----------- LCG split (no explicit order table) ----------- */
-function lcgPerm(n, seed) {
-  const a=1103515245>>>0, c=12345>>>0, m=0x80000000>>>0;
-  let s=seed>>>0; const arr=Array.from({length:n},(_,i)=>i+1);
-  for (let i=n;i>1;i--) { s=((a*s + c) % m)>>>0; const j=1+(s%i); [arr[i-1],arr[j-1]]=[arr[j-1],arr[i-1]]; }
-  return {perm:arr, seed, a, c, m};
+/* ========== XORSHIFT32 reorder (bit-exact in JS & Luau) ========== */
+function xorshift32(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s ^= (s << 13) >>> 0;
+    s ^= (s >>> 17) >>> 0;
+    s ^= (s << 5) >>> 0;
+    return s >>> 0;
+  };
 }
 function splitAndShuffle(b64, nPieces) {
   const n = Math.max(5, Math.min(48, nPieces|0));
   const pieceSize = Math.max(64, Math.floor(b64.length / n));
   const pieces = chunk(b64, pieceSize);
-  const seed = rint(0x2000, 0x7fffffff);
-  const {perm,a,c,m} = lcgPerm(pieces.length, seed);
+  const seed = (Math.random()*0xffffffff)>>>0;
+  const rnd = xorshift32(seed);
+  // Fisher–Yates using rnd()%i
+  const idx = Array.from({length: pieces.length}, (_,i)=>i+1);
+  for (let i=pieces.length; i>1; i--) {
+    const j = (rnd() % i) + 1;
+    const t = idx[i-1]; idx[i-1] = idx[j-1]; idx[j-1] = t;
+  }
   const shuffled = Array(pieces.length);
-  for (let i=0;i<pieces.length;i++) shuffled[perm[i]-1] = pieces[i];
-  return { pieces: shuffled, seed, a, c, m };
+  for (let i=0;i<pieces.length;i++) shuffled[idx[i]-1] = pieces[i];
+  return { pieces: shuffled, seed };  // we only ship seed now
 }
 
-/* ----------- late-stitch stage-2 split ----------- */
+/* ========== stage-2 split (late stitch) ========== */
 function splitRawLate(buf, pieces=14) {
   const n = Math.max(6, Math.min(64, pieces|0));
   const sz = Math.max(48, Math.floor(buf.length / n));
@@ -131,7 +135,7 @@ function splitRawLate(buf, pieces=14) {
   return out;
 }
 
-/* ----------- MAIN ----------- */
+/* ========== MAIN ========== */
 export function obfuscate(source, optIn = {}) {
   const opt = {
     junk: true,
@@ -141,10 +145,10 @@ export function obfuscate(source, optIn = {}) {
     latePieces: 14
   , ...optIn};
 
-  // 1) simple Luau-safe minify (no parser)
+  // 1) minify safely
   let mini = simpleMinify(source);
 
-  // 2) watermark + optional junk
+  // 2) watermark + junk
   if (opt.watermark) mini = `local __wm='${opt.watermark}'; _G.__wm=(_G.__wm or __wm)\n` + mini;
   if (opt.junk)      mini = `local __j=0 for __i=1,3 do __j=__j+__i end\n` + mini;
 
@@ -192,50 +196,106 @@ local function _join()
 end
 local _final=_join()
 local function ${L.S32}(s) local n=0 for i=1,#s do n=(n+s:byte(i))%4294967296 end return n end
-local function ${L.HSH}(s) local h=2166136261 for i=1,#s do h=((h*16777619)%4294967296); h=bit32.bxor(h, s:byte(i)) end return h end
+local function ${L.HSH}(s) local _b=bit32 or bit if not _b then error('bit lib',0) end
+  local bxor=_b.bxor; local h=2166136261
+  for i=1,#s do h=((h*16777619)%4294967296); h=bxor(h, s:byte(i)) end
+  return h
+end
 if #_final~=${FINAL_LEN} then error('len mismatch',0) end
 if ${L.S32}(_final)~=${FINAL_SUM} then error('sum mismatch',0) end
 if ${L.HSH}(_final)~=${FINAL_HSH} then error('hash mismatch',0) end
 local f,err=(loadstring or load)(_final); if not f then error(err,0) end; f()
 `;
 
-  // 5) stage-1: pack stage-2 with XOR+Caesar+LCG split
+  // 5) stage-1: pack stage-2 with XOR+Caesar, split with xorshift32
   const raw2 = Buffer.from(stage2,'utf8');
   const LEN1=raw2.length>>>0, SUM1=sum32(raw2), HSH1=mulHash(raw2);
   const KEY1=rint(7,251), SHIFT1=rint(1,25);
   const b64 = Buffer.from(caesar(xorBytes(raw2,KEY1),SHIFT1)).toString('base64');
-  const { pieces: P1, seed, a, c, m } = splitAndShuffle(b64, opt.split);
+  const { pieces: P1, seed } = splitAndShuffle(b64, opt.split);
 
+  // polymorphic names
   const ID = { K:randIdent(), SH:randIdent(), SL:randIdent(), SM:randIdent(), HH:randIdent(),
-               P:randIdent(), SEED:randIdent(), A:randIdent(), C:randIdent(), M:randIdent(),
+               P:randIdent(), SEED:randIdent(),
                B:randIdent(), DEC:randIdent(), CA:randIdent(), XOR:randIdent(),
-               S32:randIdent(), LZ:randIdent(), R:randIdent(), W:randIdent() };
+               S32:randIdent(), LZ:randIdent(), R:randIdent(), W:randIdent(),
+               BIT:randIdent(), BX:randIdent(), LS:randIdent(), RS:randIdent(), XS:randIdent() };
 
-  const stub = `--[[ lua-obf v1.5 (hard, no parser, no preview) ]]
+  const stub = `--[[ lua-obf v1.5.1 (xorshift32 reorder) ]]
 do
+  -- bit32/bit fallback
+  local ${ID.BIT} = bit32 or bit
+  if not ${ID.BIT} then error('bit library missing',0) end
+  local ${ID.BX} = ${ID.BIT}.bxor
+  local ${ID.LS} = ${ID.BIT}.lshift
+  local ${ID.RS} = ${ID.BIT}.rshift
+
   local ${ID.K}=${KEY1} local ${ID.SH}=${SHIFT1}
   local ${ID.SL}=${LEN1} local ${ID.SM}=${SUM1} local ${ID.HH}=${HSH1}
   local ${ID.P}={ ${P1.map(s=>`[[${s}]]`).join(',')} }
-  local ${ID.SEED}=${seed} local ${ID.A}=${a} local ${ID.C}=${c} local ${ID.M}=${m}
+  local ${ID.SEED}=${seed}
+
+  -- base64
   local ${ID.B}='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-  local function ${ID.DEC}(s) local T,out={},{} for i=1,#${ID.B} do T[${ID.B}:sub(i,i)]=i-1 end
-    local v,b=0,0 for i=1,#s do local ch=s:sub(i,i); local t=T[ch]
-      if t~=nil then v=v*64+t; b=b+6 if b>=8 then b=b-8; out[#out+1]=string.char(math.floor(v/(2^b))%256) end end end
-    return table.concat(out) end
+  local function ${ID.DEC}(s)
+    local T,out={},{}
+    for i=1,#${ID.B} do T[${ID.B}:sub(i,i)]=i-1 end
+    local v,b=0,0
+    for i=1,#s do
+      local ch=s:sub(i,i)
+      local t=T[ch]
+      if t~=nil then
+        v=v*64+t; b=b+6
+        if b>=8 then b=b-8; out[#out+1]=string.char(math.floor(v/(2^b))%256) end
+      elseif ch=='=' then
+        -- ignore padding
+      end
+    end
+    return table.concat(out)
+  end
+
   local function ${ID.CA}(s,sh) local o={} for i=1,#s do o[i]=string.char((s:byte(i)-sh)%256) end return table.concat(o) end
-  local function ${ID.XOR}(s,k) local o={} for i=1,#s do o[i]=string.char(bit32.bxor(s:byte(i),k)) end return table.concat(o) end
+  local function ${ID.XOR}(s,k) local o={} for i=1,#s do o[i]=string.char(${ID.BX}(s:byte(i),k)) end return table.concat(o) end
   local function ${ID.S32}(s) local n=0 for i=1,#s do n=(n+s:byte(i))%4294967296 end return n end
-  local function ${ID.LZ}(s) local h=2166136261 for i=1,#s do h=((h*16777619)%4294967296); h=bit32.bxor(h,s:byte(i)) end return h end
-  local function ${ID.R}(n,seed,a,c,m) local s=seed local idx={} for i=1,n do idx[i]=i end
-    for i=n,2,-1 do s=((a*s+c)%m) local j=1+(s%i) idx[i],idx[j]=idx[j],idx[i] end
-    local t={} for i=1,n do t[#t+1]=${ID.P}[idx[i]] end return table.concat(t) end
-  local ${ID.W}=(task and task.wait) or function(t) local st=os.clock() while os.clock()-st<(t or 0.016) do end end
+  local function ${ID.LZ}(s)
+    local h=2166136261
+    for i=1,#s do h=((h*16777619)%4294967296); h=${ID.BX}(h, s:byte(i)) end
+    return h
+  end
+
+  -- xorshift32 + Fisher–Yates (matches server exactly)
+  local function ${ID.XS}(seed)
+    local s = seed % 4294967296
+    return function()
+      s = ${ID.BX}(s, ${ID.LS}(s,13) % 4294967296)
+      s = ${ID.BX}(s, ${ID.RS}(s,17))
+      s = ${ID.BX}(s, ${ID.LS}(s,5) % 4294967296)
+      return s % 4294967296
+    end
+  end
+  local function ${ID.R}(pieces, seed)
+    local n = #pieces
+    local idx = {} for i=1,n do idx[i]=i end
+    local rnd = ${ID.XS}(seed)
+    for i=n,2,-1 do
+      local j = (rnd() % i) + 1
+      idx[i], idx[j] = idx[j], idx[i]
+    end
+    local t = {}
+    for i=1,n do t[#t+1] = pieces[ idx[i] ] end
+    return table.concat(t)
+  end
+
+  local ${ID.W} = (task and task.wait) or function(t) local st=os.clock() while os.clock()-st<(t or 0.016) do end end
   ${ID.W}(0.016*${opt.delayFrames|0})
-  local joined=${ID.R}(#${ID.P},${ID.SEED},${ID.A},${ID.C},${ID.M})
+
+  local joined=${ID.R}(${ID.P}, ${ID.SEED})
   local p=${ID.DEC}(joined); p=${ID.CA}(p,${ID.SH}); local raw=${ID.XOR}(p,${ID.K})
+
   if #raw~=${ID.SL} then error('len1',0) end
   if ${ID.S32}(raw)~=${ID.SM} then error('sum1',0) end
   if ${ID.LZ}(raw)~=${ID.HH} then error('hash1',0) end
+
   local f,err=(loadstring or load)(raw); if not f then error(err,0) end; f()
 end
 `;
